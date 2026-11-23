@@ -78,7 +78,8 @@ jobs:
             | awk -F: '$1=="ssb" && $12 ~ /s/ {found=1} found && $1=="fpr" {print $10; exit}')
           [[ -n $signing ]] || { echo "no signing subkey imported" >&2; exit 1; }
           tools/build-index _site --sign "$signing"
-          gpgv --keyring <(gpg --dearmor <keys/gufo-archive-keyring.asc) _site/dists/*/InRelease
+          gpg --dearmor <keys/gufo-archive-keyring.asc >"$RUNNER_TEMP/gufo.gpg"
+          for release in _site/dists/*/InRelease; do gpgv --keyring "$RUNNER_TEMP/gufo.gpg" "$release"; done
 
       - name: Install from the built site in a clean Debian container
         run: tests/smoke-test _site
