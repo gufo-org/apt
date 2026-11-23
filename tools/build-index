@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""Build the static APT repository site from the manifests.
+
+  tools/build-index OUTPUT [--sign FINGERPRINT]
+
+Writes dists/<suite>/{Release,InRelease,Release.gpg} and
+dists/<suite>/<component>/binary-<arch>/Packages{,.gz}, and copies static/.
+Packages under pool/ are not copied: the web front end redirects them to the
+GitHub release assets they came from. With --sign, gpg signs the Release file
+using the given key; APT_SIGNING_PASSPHRASE supplies its passphrase.
+"""
+
+import argparse
+import email.utils
+import gzip
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import aptlib  # noqa: E402
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ARCHITECTURES = ["amd64"]
+ORIGIN = "Gufo"
+
+
+def package_stanza(entry):
+    fields = [entry["control"]]
+    fields.append(f"Filename: {entry['filename']}")
+    fields.append(f"Size: {entry['size']}")
+    fields.append(f"SHA256: {entry['sha256']}")
+    return "\n".join(fields) + "\n"
+
+
+def sort_key(entry):
+    fields = aptlib.parse_paragraph(entry["control"])
+    return fields["Package"], entry["filename"]
+
+
+def load_entries(manifests):
+    entries = []
+    for name in sorted(os.listdir(manifests)):
+        if name.endswith(".json"):
+            with open(os.path.join(manifests, name)) as handle:
+                entries.extend(json.load(handle)["entries"])
+    return entries
+
+
+def gzip_bytes(data):
+    out = gzip.compress(data, compresslevel=9, mtime=0)
+    return out
+
+
+def sign(release_path, fingerprint):
+    passphrase = os.environ.get("APT_SIGNING_PASSPHRASE")
+    base = ["gpg", "--batch", "--yes", "--local-user", f"{fingerprint}!", "--digest-algo", "SHA512"]
+    if passphrase is not None:
+        base += ["--pinentry-mode", "loopback", "--passphrase-fd", "0"]
+    directory = os.path.dirname(release_path)
+    for extra, output in (
+        (["--clearsign"], "InRelease"),
+        (["--armor", "--detach-sign"], "Release.gpg"),
+    ):
+        subprocess.run(
+            base + extra + ["--output", os.path.join(directory, output), release_path],
+            input=(passphrase or "").encode(),
+            check=True,
+        )
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("output")
+    parser.add_argument("--sign", metavar="FINGERPRINT")
+    parser.add_argument("--manifests", default=os.path.join(ROOT, "packages"))
+    parser.add_argument("--static", default=os.path.join(ROOT, "static"))
+    args = parser.parse_args()
+
+    entries = load_entries(args.manifests)
+    if os.path.exists(args.output):
+        shutil.rmtree(args.output)
+    shutil.copytree(args.static, args.output)
+
+    epoch = int(os.environ.get("SOURCE_DATE_EPOCH", time.time()))
+    date = email.utils.formatdate(epoch, usegmt=True)
+
+    suites = {}
+    for entry in entries:
+        suites.setdefault(entry["suite"], {}).setdefault(entry["component"], []).append(entry)
+
+    for suite, components in sorted(suites.items()):
+        dist = os.path.join(args.output, "dists", suite)
+        hashes = []
+        for component, items in sorted(components.items()):
+            for arch in ARCHITECTURES:
+                selected = []
+                for entry in sorted(items, key=sort_key):
+                    entry_arch = aptlib.parse_paragraph(entry["control"])["Architecture"]
+                    if entry_arch not in ARCHITECTURES + ["all"]:
+                        sys.exit(f"unsupported architecture {entry_arch} in {entry['filename']}")
+                    if entry_arch in (arch, "all"):
+                        selected.append(package_stanza(entry))
+                packages = "\n".join(selected).encode()
+                relative = f"{component}/binary-{arch}/Packages"
+                os.makedirs(os.path.join(dist, os.path.dirname(relative)), exist_ok=True)
+                for name, data in ((relative, packages), (relative + ".gz", gzip_bytes(packages))):
+                    with open(os.path.join(dist, name), "wb") as handle:
+                        handle.write(data)
+                    hashes.append((aptlib.sha256(data), len(data), name))
+
+        release = "\n".join(
+            [
+                f"Origin: {ORIGIN}",
+                f"Label: {ORIGIN}",
+                f"Suite: {suite}",
+                f"Codename: {suite}",
+                f"Date: {date}",
+                f"Architectures: {' '.join(ARCHITECTURES)}",
+                f"Components: {' '.join(sorted(components))}",
+                "Acquire-By-Hash: no",
+                "SHA256:",
+            ]
+            + [f" {digest} {size:>10} {name}" for digest, size, name in hashes]
+        ) + "\n"
+        release_path = os.path.join(dist, "Release")
+        with open(release_path, "w") as handle:
+            handle.write(release)
+        if args.sign:
+            sign(release_path, args.sign)
+        print(f"built {suite}: {sum(len(v) for v in components.values())} packages")
+
+
+if __name__ == "__main__":
+    main()

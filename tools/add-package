@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+"""Add one released .deb to the repository manifest.
+
+  tools/add-package --url https://github.com/gufo-org/<repo>/releases/download/<tag>/<file>.deb \
+                    --sha256 <hex> [--suite trixie] [--component main]
+  tools/add-package --keyring static/keyring/<file>.deb [--suite ...]
+
+The package is downloaded and checked against the expected SHA-256 before its
+control data is recorded. Re-adding an identical package is a no-op, so
+retries are safe; a different file for an existing name, version and
+architecture is refused, so published versions stay immutable.
+"""
+
+import argparse
+import json
+import os
+import sys
+import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import aptlib  # noqa: E402
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def fetch(url):
+    request = urllib.request.Request(url, headers={"User-Agent": "gufo-apt-publisher"})
+    with urllib.request.urlopen(request, timeout=300) as response:
+        return response.read()
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--url", help="release asset URL of the .deb")
+    source.add_argument("--keyring", help="path of a keyring .deb under static/keyring/")
+    parser.add_argument("--sha256", help="expected SHA-256 (required with --url)")
+    parser.add_argument("--suite", default="trixie")
+    parser.add_argument("--component", default="main")
+    parser.add_argument("--manifests", default=os.path.join(ROOT, "packages"))
+    args = parser.parse_args()
+
+    if not aptlib.SUITE.match(args.suite) or not aptlib.SUITE.match(args.component):
+        parser.error("suite and component must be lowercase identifiers")
+    if args.url:
+        if not args.sha256:
+            parser.error("--sha256 is required with --url")
+        filename = aptlib.pool_path(args.url)
+        data = fetch(args.url)
+        if aptlib.sha256(data) != args.sha256.lower():
+            sys.exit(f"SHA-256 mismatch for {args.url}")
+    else:
+        path = os.path.relpath(os.path.abspath(args.keyring), os.path.join(ROOT, "static"))
+        if not path.startswith("keyring/") or not path.endswith(".deb"):
+            parser.error("--keyring must be a .deb under static/keyring/")
+        filename = path
+        with open(args.keyring, "rb") as handle:
+            data = handle.read()
+        if args.sha256 and aptlib.sha256(data) != args.sha256.lower():
+            sys.exit(f"SHA-256 mismatch for {args.keyring}")
+
+    control = aptlib.deb_control(data)
+    fields = aptlib.parse_paragraph(control)
+    name, version, arch = fields["Package"], fields["Version"], fields["Architecture"]
+    if not aptlib.PACKAGE.match(name):
+        sys.exit(f"invalid package name {name!r}")
+    entry = {
+        "suite": args.suite,
+        "component": args.component,
+        "filename": filename,
+        "size": len(data),
+        "sha256": aptlib.sha256(data),
+        "control": control,
+    }
+
+    manifest_path = os.path.join(args.manifests, f"{name}.json")
+    entries = []
+    if os.path.exists(manifest_path):
+        with open(manifest_path) as handle:
+            entries = json.load(handle)["entries"]
+    for existing in entries:
+        old = aptlib.parse_paragraph(existing["control"])
+        same_slot = (
+            existing["suite"] == args.suite
+            and (old["Package"], old["Version"], old["Architecture"]) == (name, version, arch)
+        )
+        if not same_slot:
+            continue
+        if existing == entry:
+            print(f"{name} {version} {arch} already in {args.suite}; nothing to do")
+            return
+        sys.exit(f"{name} {version} {arch} already in {args.suite} with different content")
+
+    entries.append(entry)
+    entries.sort(key=lambda e: (e["suite"], e["filename"]))
+    os.makedirs(args.manifests, exist_ok=True)
+    with open(manifest_path, "w") as handle:
+        json.dump({"entries": entries}, handle, indent=2)
+        handle.write("\n")
+    print(f"added {name} {version} {arch} to {args.suite}/{args.component}")
+
+
+if __name__ == "__main__":
+    main()

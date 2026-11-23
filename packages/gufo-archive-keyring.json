@@ -1,0 +1,12 @@
+{
+  "entries": [
+    {
+      "suite": "trixie",
+      "component": "main",
+      "filename": "keyring/gufo-archive-keyring_2026.11.23_all.deb",
+      "size": 1604,
+      "sha256": "e8c4bf1c7b8d3ef87d9a92545e2c73763b7140a455d18e7c5673255c4be46fc5",
+      "control": "Package: gufo-archive-keyring\nVersion: 2026.11.23\nArchitecture: all\nMaintainer: Gufo Maintainers <maintainers@gufo.dev>\nInstalled-Size: 1\nSection: misc\nPriority: optional\nMulti-Arch: foreign\nHomepage: https://apt.gufo.blog\nDescription: signing key and APT source for the Gufo package repository\n Installs the OpenPGP key that signs https://apt.gufo.blog and an APT\n source for its trixie suite. Upgrading this package renews the key."
+    }
+  ]
+}

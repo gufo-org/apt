@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gufo APT repository</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem}pre{overflow-x:auto;background:#f4f4f4;padding:1rem}@media(prefers-color-scheme:dark){body{background:#111;color:#ddd}pre{background:#222}a{color:#8ab4f8}}</style>
+<h1>Gufo APT repository</h1>
+<p>Signed packages for Debian 13 (trixie), amd64. <code>gufo</code> requires AMD's ROCm 10.1 apt repository.</p>
+<pre>curl -fsSLo /tmp/gufo-archive-keyring.deb https://apt.gufo.blog/gufo-archive-keyring.deb
+sudo apt install /tmp/gufo-archive-keyring.deb
+sudo apt update
+sudo apt install gufo</pre>
+<p>Signing key: <a href="gufo-archive-keyring.asc">gufo-archive-keyring.asc</a>, fingerprint <code>077A EBA3 DFCF 360A 72EA 2D49 FD8D F2D4 80A2 9245</code>.</p>
+<p>Source and documentation: <a href="https://github.com/gufo-org/apt">github.com/gufo-org/apt</a>.</p>
+</html>

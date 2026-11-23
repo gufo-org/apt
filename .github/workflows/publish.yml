@@ -1,0 +1,101 @@
+name: Publish APT repository
+
+# Producers in gufo-org add a released package by sending a repository
+# dispatch (event type "add-package") with a client payload of
+# {"url": "<release asset URL>", "sha256": "<hex>", "suite": "trixie"}.
+# The package's release must already be public. A manual run can add a
+# package the same way, or with no URL just rebuild and redeploy the site.
+on:
+  repository_dispatch:
+    types: [add-package]
+  workflow_dispatch:
+    inputs:
+      url:
+        description: Release asset URL of the .deb (empty to rebuild only)
+        required: false
+        default: ""
+      sha256:
+        description: Expected SHA-256 of the .deb
+        required: false
+        default: ""
+      suite:
+        description: Suite (Debian codename)
+        required: false
+        default: trixie
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apt-publish
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Unit tests
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Add the package to the manifest
+        env:
+          URL: ${{ github.event.client_payload.url || inputs.url }}
+          SHA256: ${{ github.event.client_payload.sha256 || inputs.sha256 }}
+          SUITE: ${{ github.event.client_payload.suite || inputs.suite || 'trixie' }}
+        run: |
+          if [[ -z $URL ]]; then
+            echo "No package given; rebuilding the site."
+            exit 0
+          fi
+          tools/add-package --url "$URL" --sha256 "$SHA256" --suite "$SUITE"
+          if git diff --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages
+          git commit -m "Add $(basename "$URL")"
+          git push origin HEAD:main
+
+      - name: Import the signing key
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+        run: |
+          gpg --batch --import <<<"$APT_SIGNING_KEY"
+          gpg --batch --import keys/gufo-archive-keyring.asc
+
+      - name: Build and sign the site
+        env:
+          APT_SIGNING_PASSPHRASE: ${{ secrets.APT_SIGNING_PASSPHRASE }}
+        run: |
+          signing=$(gpg --list-secret-keys --with-colons \
+            | awk -F: '$1=="ssb" && $12 ~ /s/ {found=1} found && $1=="fpr" {print $10; exit}')
+          [[ -n $signing ]] || { echo "no signing subkey imported" >&2; exit 1; }
+          tools/build-index _site --sign "$signing"
+          gpgv --keyring <(gpg --dearmor <keys/gufo-archive-keyring.asc) _site/dists/*/InRelease
+
+      - name: Install from the built site in a clean Debian container
+        run: tests/smoke-test _site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

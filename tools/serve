@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+"""Serve a built site locally the way apt.gufo.blog serves it.
+
+  tools/serve SITE [--port 8080]
+
+Static files come from SITE. Requests under /pool/ are redirected to GitHub
+release assets, mirroring the Cloudflare redirect rule, so tests exercise the
+same paths and redirects as clients do.
+"""
+
+import argparse
+import functools
+import http.server
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import aptlib  # noqa: E402
+
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def _redirect_pool(self):
+        if not self.path.startswith("/pool/"):
+            return False
+        try:
+            target = aptlib.release_url(self.path.lstrip("/").split("?")[0])
+        except ValueError:
+            self.send_error(404)
+            return True
+        self.send_response(302)
+        self.send_header("Location", target)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+        return True
+
+    def do_GET(self):
+        if not self._redirect_pool():
+            super().do_GET()
+
+    def do_HEAD(self):
+        if not self._redirect_pool():
+            super().do_HEAD()
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("site")
+    parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--bind", default="127.0.0.1")
+    args = parser.parse_args()
+    handler = functools.partial(Handler, directory=os.path.abspath(args.site))
+    server = http.server.ThreadingHTTPServer((args.bind, args.port), handler)
+    print(f"serving {args.site} on http://{args.bind}:{args.port}", flush=True)
+    server.serve_forever()
+
+
+if __name__ == "__main__":
+    main()

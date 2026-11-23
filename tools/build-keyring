@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""Build the gufo-archive-keyring package from keys/gufo-archive-keyring.asc.
+
+  tools/build-keyring VERSION      # e.g. 2026.11.23
+
+Writes static/keyring/gufo-archive-keyring_VERSION_all.deb and refreshes the
+stable bootstrap copies static/gufo-archive-keyring.{deb,asc}. The package
+installs the public key and an APT source using it, so a renewed key reaches
+clients through an ordinary upgrade. Builds are reproducible.
+"""
+
+import calendar
+import os
+import re
+import sys
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import aptlib  # noqa: E402
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+KEY = "/usr/share/keyrings/gufo-archive-keyring.asc"
+SOURCES = "/etc/apt/sources.list.d/gufo.sources"
+SUITE = "trixie"
+
+
+def main():
+    if len(sys.argv) != 2 or not re.match(r"^\d{4}\.\d{2}\.\d{2}(\.\d+)?$", sys.argv[1]):
+        sys.exit("usage: tools/build-keyring YYYY.MM.DD[.N]")
+    version = sys.argv[1]
+    mtime = calendar.timegm(time.strptime(".".join(version.split(".")[:3]), "%Y.%m.%d"))
+
+    with open(os.path.join(ROOT, "keys", "gufo-archive-keyring.asc"), "rb") as handle:
+        key = handle.read()
+    sources = (
+        "Types: deb\n"
+        "URIs: https://apt.gufo.blog\n"
+        f"Suites: {SUITE}\n"
+        "Components: main\n"
+        "Architectures: amd64\n"
+        f"Signed-By: {KEY}\n"
+    ).encode()
+    files = [
+        ("etc/", 0o755, None),
+        ("etc/apt/", 0o755, None),
+        ("etc/apt/sources.list.d/", 0o755, None),
+        (SOURCES, 0o644, sources),
+        ("usr/", 0o755, None),
+        ("usr/share/", 0o755, None),
+        ("usr/share/keyrings/", 0o755, None),
+        (KEY, 0o644, key),
+    ]
+    installed_kib = max(1, (len(key) + len(sources) + 1023) // 1024)
+    control = (
+        "Package: gufo-archive-keyring\n"
+        f"Version: {version}\n"
+        "Architecture: all\n"
+        "Maintainer: Gufo Maintainers <maintainers@gufo.dev>\n"
+        f"Installed-Size: {installed_kib}\n"
+        "Section: misc\n"
+        "Priority: optional\n"
+        "Multi-Arch: foreign\n"
+        "Homepage: https://apt.gufo.blog\n"
+        "Description: signing key and APT source for the Gufo package repository\n"
+        " Installs the OpenPGP key that signs https://apt.gufo.blog and an APT\n"
+        f" source for its {SUITE} suite. Upgrading this package renews the key.\n"
+    )
+    deb = aptlib.build_deb(control, files, conffiles=[SOURCES], mtime=mtime)
+
+    name = f"gufo-archive-keyring_{version}_all.deb"
+    static = os.path.join(ROOT, "static")
+    os.makedirs(os.path.join(static, "keyring"), exist_ok=True)
+    for path, data in (
+        (os.path.join(static, "keyring", name), deb),
+        (os.path.join(static, "gufo-archive-keyring.deb"), deb),
+        (os.path.join(static, "gufo-archive-keyring.asc"), key),
+    ):
+        with open(path, "wb") as handle:
+            handle.write(data)
+    print(f"static/keyring/{name} {aptlib.sha256(deb)}")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Install from a built site in a clean Debian container, through tools/serve.
+#   tests/smoke-test SITE [PUBLIC_KEY]
+# PUBLIC_KEY overrides the packaged key, for sites signed with a test key.
+# Checks: the bootstrap keyring package installs, apt verifies the signed
+# index, every package's newest version is the candidate, the keyring package
+# reinstalls from the repository, and the newest and oldest Gufo packages
+# download through the pool redirect with matching hashes.
+set -euo pipefail
+[[ $# == 1 || $# == 2 ]] || { echo 'usage: tests/smoke-test SITE [PUBLIC_KEY]' >&2; exit 2; }
+here=$(cd "$(dirname "$0")/.." && pwd)
+site=$(realpath "$1")
+key=${2:+$(realpath "$2")}
+port=${PORT:-18080}
+
+python3 "$here/tools/serve" "$site" --port "$port" &
+server=$!
+trap 'kill $server 2>/dev/null || true' EXIT
+for _ in $(seq 50); do
+  python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:$port/dists/')" 2>/dev/null && break
+  sleep 0.1
+done
+
+expected=$(python3 - "$here/packages" <<'PY'
+import json, os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(sys.argv[1]), "tools"))
+import aptlib
+newest, oldest = {}, {}
+for name in sorted(os.listdir(sys.argv[1])):
+    for e in json.load(open(os.path.join(sys.argv[1], name)))["entries"]:
+        f = aptlib.parse_paragraph(e["control"])
+        newest[f["Package"]] = f["Version"]
+        oldest.setdefault(f["Package"], f["Version"])
+print(" ".join(f"{p}={v}" for p, v in sorted(newest.items())))
+print(" ".join(f"{p}={v}" for p, v in sorted(oldest.items()) if p == "gufo"))
+PY
+)
+newest=$(sed -n 1p <<<"$expected")
+oldest=$(sed -n 2p <<<"$expected")
+
+docker run --rm --network host \
+  -v "$site:/site:ro" ${key:+-v "$key:/test-key.asc:ro"} \
+  -e PORT="$port" -e NEWEST="$newest" -e OLDEST="$oldest" -e TEST_KEY="${key:+/test-key.asc}" \
+  -e DEBIAN_FRONTEND=noninteractive debian:trixie bash -euo pipefail -c '
+    apt-get update -qq && apt-get install -y -qq ca-certificates >/dev/null
+    dpkg -i /site/gufo-archive-keyring.deb
+    src=/etc/apt/sources.list.d/gufo.sources
+    sed -i "s|^URIs: .*|URIs: http://127.0.0.1:$PORT|" "$src"
+    if [[ -n $TEST_KEY ]]; then sed -i "s|^Signed-By: .*|Signed-By: $TEST_KEY|" "$src"; fi
+    apt-get update --error-on=any
+    for spec in $NEWEST; do
+      candidate=$(apt-cache policy "${spec%%=*}" | awk "/Candidate:/{print \$2}")
+      [[ $candidate == "${spec#*=}" ]] || { echo "candidate $candidate, want $spec" >&2; exit 1; }
+    done
+    apt-get install -y -qq --reinstall -o Dpkg::Options::=--force-confold gufo-archive-keyring
+    cd /tmp
+    for spec in $NEWEST $OLDEST; do
+      [[ ${spec%%=*} == gufo ]] && apt-get download -q "$spec"
+    done
+    ls -l /tmp/*.deb
+  '
+echo "smoke test passed: $newest"
