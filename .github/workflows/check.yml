@@ -15,7 +15,8 @@ jobs:
         run: python3 -m unittest discover -s tests -v
       - name: Build a site signed with a throwaway key and install from it
         run: |
-          export GNUPGHOME=$(mktemp -d)
+          GNUPGHOME=$(mktemp -d)
+          export GNUPGHOME
           gpg --batch --passphrase '' --quick-gen-key 'Test <test@invalid>' ed25519 sign 1d
           fpr=$(gpg --list-keys --with-colons | awk -F: '/^fpr/{print $10; exit}')
           gpg --armor --export "$fpr" > "$RUNNER_TEMP/test-key.asc"
