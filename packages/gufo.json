@@ -87,6 +87,14 @@
       "size": 17688756,
       "sha256": "c43b9e5e785e6819dd5c45aef48845618453bd9db3bd3808d51198030564016d",
       "control": "Package: gufo\nVersion: 0.36.0-1\nArchitecture: amd64\nMaintainer: Gufo Maintainers <maintainers@gufo.dev>\nSection: utils\nPriority: optional\nHomepage: https://github.com/gufo-org/gufo\nDepends: amdrocm-blas-host10.1 (>= 10.1.0~pre3), amdrocm-runtime10.1 (>= 10.1.0~pre3), libc6 (>= 2.39), libcurl4t64 (>= 7.66.0), libgcc-s1 (>= 4.2), libgomp1 (>= 4.9), libicu76 (>= 76.1-1~), libopus0 (>= 1.1), libpng16-16t64 (>= 1.6.46), libssl3t64 (>= 3.0.0), libstdc++6 (>= 14), libuuid1 (>= 2.16), libwebp7 (>= 1.5.0), zlib1g (>= 1:1.1.4), amdrocm-runtime10.1 (>= 10.1.0-3), amdrocm-blas10.1-gfx1151 (>= 10.1.0-3), ffmpeg\nInstalled-Size: 80648\nDescription: Strix Halo inference engine\n Local inference for AMD Strix Halo (gfx1151).\n Includes the executable, runtime data and licenses. No service is started."
+    },
+    {
+      "suite": "trixie",
+      "component": "main",
+      "filename": "pool/gufo/v0.37.0/gufo_0.37.0-1_amd64.deb",
+      "size": 19234844,
+      "sha256": "efba9e2fdeea249ced838bcd1d23f5520822fb9f3c261935129c524264e5602b",
+      "control": "Package: gufo\nVersion: 0.37.0-1\nArchitecture: amd64\nMaintainer: Gufo Maintainers <maintainers@gufo.dev>\nSection: utils\nPriority: optional\nHomepage: https://github.com/gufo-org/gufo\nDepends: amdrocm-blas-host10.1 (>= 10.1.0~pre3), amdrocm-runtime10.1 (>= 10.1.0~pre3), libc6 (>= 2.39), libcurl4t64 (>= 7.66.0), libgcc-s1 (>= 4.2), libgomp1 (>= 4.9), libicu76 (>= 76.1-1~), libopus0 (>= 1.1), libssl3t64 (>= 3.0.0), libstdc++6 (>= 14), libuuid1 (>= 2.16), libwebp7 (>= 1.5.0), amdrocm-runtime10.1 (>= 10.1.0-3), amdrocm-blas10.1-gfx1151 (>= 10.1.0-3), ffmpeg\nInstalled-Size: 87748\nDescription: Strix Halo inference engine\n Local inference for AMD Strix Halo (gfx1151).\n Includes the executable, runtime data and licenses. No service is started."
     }
   ]
 }
